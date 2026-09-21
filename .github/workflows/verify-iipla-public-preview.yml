@@ -1,0 +1,58 @@
+name: Verify IIPLA public preview
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'iipla-patent-brokerage/index.html'
+      - 'iipla-patent-brokerage/README.md'
+      - '.github/workflows/verify-iipla-public-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-url-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check the public URL without authentication
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, time, urllib.request, urllib.error
+          from html.parser import HTMLParser
+          url = 'https://azamghani.github.io/html-portfolio/iipla-patent-brokerage/'
+          expected = '99a1196e0d5a9576840082f2ef346a314851d845f41536a5fba3a6779fb8eeda'
+          class PageCheck(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.phone_required=False; self.cards=0; self.forms=set()
+              def handle_starttag(self, tag, attrs):
+                  a=dict(attrs)
+                  if tag=='input' and a.get('id')=='phone': self.phone_required='required' in a
+                  if 'tech-card' in a.get('class','').split(): self.cards+=1
+                  if tag=='form': self.forms.add(a.get('id'))
+          last_error = None
+          for attempt in range(24):
+              try:
+                  req=urllib.request.Request(url+'?check='+str(int(time.time())), headers={'User-Agent':'IIPLA-preview-verification','Cache-Control':'no-cache'})
+                  with urllib.request.urlopen(req, timeout=12) as response:
+                      assert response.status==200
+                      body=response.read()
+                  assert hashlib.sha256(body).hexdigest()==expected, 'Waiting for latest HTML deployment'
+                  text=body.decode('utf-8')
+                  parser=PageCheck(); parser.feed(text)
+                  assert parser.phone_required, 'Mandatory phone missing'
+                  assert parser.cards==32, 'Technology category count mismatch'
+                  assert {'lead-form','portfolio-form'} <= parser.forms
+                  assert "mode: 'preview'" in text
+                  assert 'noindex,nofollow' in text
+                  print('PUBLIC_URL_VERIFIED:', url)
+                  print('HTTP 200; exact source SHA-256 match; 32 categories; mandatory phone; preview forms.')
+                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+                      summary.write('## Public URL verified\n\n'+url+'\n\nUnauthenticated HTTP 200. Exact HTML source integrity checked. 32 technology categories and required phone confirmed. Forms remain in preview mode.\n')
+                  break
+              except (urllib.error.URLError, AssertionError, TimeoutError) as exc:
+                  last_error=exc
+                  print('Waiting for Pages deployment:', str(exc))
+                  time.sleep(10)
+          else:
+              raise RuntimeError('Public preview verification failed: '+str(last_error))
+          PY
