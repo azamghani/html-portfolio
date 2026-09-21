@@ -1,0 +1,72 @@
+name: Prepare IIPLA public preview
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'iipla-patent-brokerage/page-*.txt'
+      - '.github/workflows/publish-iipla-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify and publish the approved HTML in its isolated folder
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, urllib.request, urllib.error
+          repo = os.environ['REPOSITORY']
+          assert repo == 'azamghani/html-portfolio'
+          folder = 'iipla-patent-brokerage/'
+          expected = '99a1196e0d5a9576840082f2ef346a314851d845f41536a5fba3a6779fb8eeda'
+          token = os.environ['GH_TOKEN']
+          def api(path, method='GET', data=None):
+              req = urllib.request.Request('https://api.github.com/repos/' + repo + '/contents/' + path,
+                  data=None if data is None else json.dumps(data).encode(), method=method,
+                  headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+                           'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'})
+              with urllib.request.urlopen(req, timeout=40) as response:
+                  return json.load(response)
+          parts = []
+          for n in range(1, 5):
+              url = 'https://raw.githubusercontent.com/' + repo + '/' + os.environ['COMMIT_SHA'] + '/' + folder + 'page-' + str(n) + '.txt'
+              with urllib.request.urlopen(url, timeout=40) as response:
+                  part = response.read().decode('ascii').strip()
+              # Correct the one known transfer character; the full SHA-256 must match.
+              if n == 2:
+                  part = part.replace('KOcJ0Cb+RvL+ODnd', 'KOcJ0Cb+RvL+PDnd')
+              parts.append(part)
+          html = gzip.decompress(base64.b64decode(''.join(parts), validate=True))
+          actual = hashlib.sha256(html).hexdigest()
+          assert actual == expected, 'HTML integrity mismatch: ' + actual
+          text = html.decode('utf-8')
+          assert 'IIPLA Patent Brokerage' in text
+          assert "mode: 'preview'" in text
+          assert 'noindex,nofollow' in text
+          def write(path, content, message):
+              assert path.startswith(folder)
+              try:
+                  current = api(path)
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404:
+                      raise
+                  current = None
+              if current and base64.b64decode(current['content']) == content:
+                  return
+              payload = {'message': message, 'content': base64.b64encode(content).decode('ascii'), 'branch': 'main'}
+              if current:
+                  payload['sha'] = current['sha']
+              api(path, 'PUT', payload)
+          write(folder + 'page-2.txt', parts[1].encode('ascii'), 'Correct preview transfer character; preserve verified source')
+          write(folder + 'index.html', html, 'Publish verified IIPLA interactive HTML preview')
+          print('Approved HTML verified and published:', len(html), 'bytes; SHA256:', actual)
+          print('Only files inside', folder, 'were updated. Forms remain in preview mode.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## IIPLA preview prepared\n\nSource integrity verified. Standard HTML published in the isolated preview folder. No changes to existing website pages. Forms do not transmit leads.\n')
+          PY
