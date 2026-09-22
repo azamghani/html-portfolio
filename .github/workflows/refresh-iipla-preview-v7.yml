@@ -1,0 +1,61 @@
+name: Refocus IIPLA on patent sales only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-iipla-preview-v7.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: iipla-preview-copy-update
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Build and publish the reviewed sales-only HTML
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, subprocess, tempfile, urllib.request
+          repo=os.environ['REPOSITORY']
+          assert repo=='azamghani/html-portfolio'
+          folder='iipla-patent-brokerage/'
+          target=folder+'index.html'
+          base_hash='b62f5b731d807618dfc72d120904f5c84d27660be561c855425baaba1730052e'
+          output_hash='0a3f32c4687d1bcc775575d5f17b0926bb1923277128c5a0b7c60b3f8ed3f766'
+          api='https://api.github.com/repos/'+repo+'/contents/'+target
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'}
+          def request(url,method='GET',data=None,authenticated=False):
+              req=urllib.request.Request(url,method=method,headers=headers if authenticated else {'User-Agent':'IIPLA-reviewed-preview-build'},data=None if data is None else json.dumps(data).encode())
+              with urllib.request.urlopen(req,timeout=40) as r:return r.read()
+          current=json.loads(request(api+'?ref=main',authenticated=True))
+          raw=base64.b64decode(current['content'])
+          actual=hashlib.sha256(raw).hexdigest()
+          if actual==output_hash:
+              print('Reviewed sales-only page already published.');raise SystemExit(0)
+          assert actual==base_hash,'Source changed; reconcile before overwrite: '+actual
+          with tempfile.TemporaryDirectory() as tmp:
+              root=pathlib.Path(tmp)
+              for name in ['build_v7.py','sales-faqs-v7.json']:
+                  u='https://raw.githubusercontent.com/'+repo+'/'+os.environ['SOURCE_COMMIT']+'/'+folder+name
+                  (root/name).write_bytes(request(u))
+              (root/'base.html').write_bytes(raw)
+              subprocess.run(['python3',str(root/'build_v7.py'),str(root/'base.html'),str(root/'index.html')],check=True)
+              result=(root/'index.html').read_bytes()
+          assert hashlib.sha256(result).hexdigest()==output_hash,'Output differs from locally tested sales-only page'
+          text=result.decode('utf-8')
+          assert '7.0-patent-sales' in text and 'Patent<br>Brokerage' in text
+          assert "mode: 'preview'" in text and "mode:'preview'" in text
+          assert 'privacyApproved: false' in text and 'privacyApproved:false' in text
+          payload={'message':'Publish IIPLA Patent Brokerage: patent sales only, acquisition enquiries and revised notices','content':base64.b64encode(result).decode(),'sha':current['sha'],'branch':'main'}
+          response=json.loads(request(api,'PUT',payload,authenticated=True))
+          print('Published only',target,'at',response['commit']['sha'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('## Patent-sales-only preview published\n\nExact locally tested HTML verified. Patent Brokerage header; owner sales intake; acquisition-only buyer modal; 30 FAQs; 32 technologies. No live intake enabled. Main IIPLA website unchanged.\n')
+          PY
