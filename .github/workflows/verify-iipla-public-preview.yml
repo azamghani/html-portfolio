@@ -23,10 +23,10 @@ jobs:
           import hashlib, os, time, urllib.request, urllib.error
           from html.parser import HTMLParser
           url='https://azamghani.github.io/html-portfolio/iipla-patent-brokerage/'
-          expected='0a3f32c4687d1bcc775575d5f17b0926bb1923277128c5a0b7c60b3f8ed3f766'
+          expected='929a384048693d2abec10e8ce1382ff1c65585bc2b8fed1db9cb00bd728082ea'
           class Check(HTMLParser):
               def __init__(self):
-                  super().__init__(); self.required=set(); self.cards=0; self.steps=0; self.faqs=0; self.notices=0; self.forms=set(); self.buyers=0; self.closing=0; self.select=None; self.choices={}
+                  super().__init__(); self.required=set(); self.cards=0; self.steps=0; self.faqs=0; self.notices=0; self.forms=set(); self.buyers=0; self.closing=0; self.select=None; self.choices={}; self.versions=0; self.ogtitle=''
               def handle_starttag(self,tag,attrs):
                   a=dict(attrs); classes=a.get('class','').split()
                   if 'required' in a:self.required.add(a.get('id'))
@@ -37,6 +37,8 @@ jobs:
                   if 'data-faq-item' in a:self.faqs+=1
                   if 'data-buyer-open' in a:self.buyers+=1
                   if tag=='form':self.forms.add(a.get('id'))
+                  if tag=='meta' and a.get('name')=='iipla-preview-version':self.versions+=1
+                  if tag=='meta' and a.get('property')=='og:title':self.ogtitle=a.get('content','')
                   if tag=='select':self.select=a.get('id');self.choices[self.select]=[]
                   if tag=='option' and self.select:self.choices[self.select].append(a.get('value'))
               def handle_endtag(self,tag):
@@ -52,19 +54,21 @@ jobs:
                   text=body.decode('utf-8');p=Check();p.feed(text)
                   assert {'phone','buyer-phone','encumbrances','representation','notice-accepted','buyer-notice-accepted'}<=p.required
                   assert p.cards==32 and p.steps==5 and p.faqs==30 and p.notices==10
-                  assert p.closing==1 and p.buyers==2
+                  assert p.closing==1 and p.buyers==2 and p.versions==1
                   assert p.forms=={'lead-form','portfolio-form','buyer-form'}
                   assert p.choices['transaction-goal']==['discuss','sale']
                   assert p.choices['payment-preference']==['discuss','upfront']
                   assert p.choices['buyer-interest']==['','acquisition','buyer-representative','exploring']
+                  assert p.ogtitle=='IIPLA Patent Brokerage | Sell Your Patents'
+                  assert 'Start a patent sale enquiry' in text
                   assert 'Patent<br>Brokerage' in text and '7.0-patent-sales' in text
                   assert "mode: 'preview'" in text and "mode:'preview'" in text and 'noindex,nofollow' in text
                   assert 'patent-brokerage-2026-09-22-v1' in text and 'PB-BUYER-2026-09-22-1' in text
                   assert 'License your IP' not in text and 'Explore a partnership' not in text
                   print('PUBLIC_URL_VERIFIED:',url)
-                  print('HTTP 200; exact tested HTML; Patent Brokerage branding; sales-only owner and buyer choices; required phone; 30 FAQs; 32 categories; all intake in preview mode.')
+                  print('HTTP 200; exact tested HTML; sales-only branding and metadata; required phone; 30 FAQs; 32 categories; three forms; no live intake.')
                   with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
-                      f.write('## Public patent-sales-only page verified\n\n'+url+'\n\nUnauthenticated HTTP 200 and exact local HTML hash confirmed. Sales-only owner intake and buyer acquisition modal; mandatory phone; 30 FAQs; all 32 patent categories. No live lead collection enabled.\n')
+                      f.write('## Public patent-sales-only page verified\n\n'+url+'\n\nUnauthenticated HTTP 200 and exact local HTML hash confirmed. Sales-only owner intake, buyer acquisition modal, mobile CTA and social preview; mandatory phone; 30 FAQs; all 32 patent categories. No live lead collection enabled.\n')
                   break
               except (urllib.error.URLError,AssertionError,TimeoutError) as e:
                   last_error=e;print('Waiting for deployment:',str(e));time.sleep(10)
