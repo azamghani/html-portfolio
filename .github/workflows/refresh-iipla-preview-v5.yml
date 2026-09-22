@@ -1,0 +1,70 @@
+name: Add IIPLA buyer enquiry route
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-iipla-preview-v5.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: iipla-preview-copy-update
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Preserve owner page and add verified buyer enquiry UI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, re, urllib.request
+          repo = os.environ['REPOSITORY']
+          assert repo == 'azamghani/html-portfolio'
+          folder = 'iipla-patent-brokerage/'
+          path = folder + 'index.html'
+          expected_base = '28a3909cdfd1aa9d11b62d00c828aed6b5b1f52ec7b8105101e8dda2a3836c98'
+          expected_snippet = '277992a2b20af835396a32ceb2341883e18d8af441f5ab7a8a807683872c9b21'
+          expected_result = '3ac1a0d781e2bb991e64b21ed1918b686e2d2e42a17490da78b2af4d2452fa6c'
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'}
+          api_root = 'https://api.github.com/repos/' + repo + '/contents/'
+          def api(relative, method='GET', data=None):
+              req = urllib.request.Request(api_root + relative, method=method, headers=headers, data=None if data is None else json.dumps(data).encode())
+              with urllib.request.urlopen(req, timeout=40) as response:
+                  return json.load(response)
+          current = api(path + '?ref=main')
+          raw = base64.b64decode(current['content'])
+          actual = hashlib.sha256(raw).hexdigest()
+          if actual == expected_result:
+              print('Verified v5 page is already published.')
+              raise SystemExit(0)
+          assert actual == expected_base, 'Page changed; reconcile before replacing: ' + actual
+          part = api(folder + 'buyer-enquiry-v5.html?ref=' + os.environ['SOURCE_COMMIT'])
+          snippet = base64.b64decode(part['content'])
+          assert hashlib.sha256(snippet).hexdigest() == expected_snippet, 'Buyer snippet transfer mismatch'
+          html = raw.decode('utf-8')
+          arrow = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>'
+          old = re.search(r'<section class="closing">.*?</section>', html, re.S).group(0)
+          assert old.count('Discuss your portfolio') == 1
+          new = old.replace('<div class="wrap closing-inner">', '<div class="wrap"><div class="closing-inner">', 1)
+          assert new.endswith('</div></section>')
+          new = new[:-len('</div></section>')] + '</div><div class="buyer-route"><p>Looking to acquire or license patents?</p><button type="button" class="buyer-route-link" data-buyer-open data-buyer-source="closing" aria-haspopup="dialog" aria-controls="buyer-enquiry">Buyer &amp; partner enquiries ' + arrow + '</button></div></div></section>'
+          html = html.replace(old, new, 1)
+          anchor = '<a href="#rights">U.S. rights &amp; eligibility</a>'
+          assert html.count(anchor) == 1
+          html = html.replace(anchor, anchor + '<button type="button" class="buyer-footer-link" data-buyer-open data-buyer-source="footer" aria-haspopup="dialog" aria-controls="buyer-enquiry">Buyer &amp; Partner Enquiries</button>', 1)
+          assert html.count('</body>') == 1
+          html = html.replace('</body>', snippet.decode('utf-8') + '\n</body>')
+          html = html.replace('<meta name="robots"', '<meta name="iipla-preview-version" content="5.0-buyer-enquiry"><meta name="robots"', 1)
+          result = html.encode('utf-8')
+          assert hashlib.sha256(result).hexdigest() == expected_result, 'Output differs from locally tested page'
+          assert "mode: 'preview'" in html and "mode:'preview'" in html and 'noindex,nofollow' in html
+          response = api(path, 'PUT', {'message': 'Add discreet buyer enquiry links and independent modal; keep seller forms unchanged', 'content': base64.b64encode(result).decode(), 'sha': current['sha'], 'branch': 'main'})
+          print('Published verified HTML:', response['commit']['sha'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('## IIPLA buyer enquiry UI prepared\n\nExact locally tested source verified. Only isolated preview index.html replaced. Existing closing CTA preserved with a subordinate buyer link and a footer entry. Separate buyer form remains in preview mode; no live endpoints enabled.\n')
+          PY
