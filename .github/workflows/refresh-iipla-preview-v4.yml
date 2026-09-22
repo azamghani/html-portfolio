@@ -1,0 +1,74 @@
+name: Refresh IIPLA Monetization preview
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-iipla-preview-v4.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: iipla-preview-copy-update
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify source and apply reviewed header, FAQs and submission notice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib, subprocess, tempfile, urllib.request
+          repo = os.environ['REPOSITORY']
+          assert repo == 'azamghani/html-portfolio'
+          folder = 'iipla-patent-brokerage/'
+          path = folder + 'index.html'
+          expected_base = '96eb5133a3a238e1f3b42e6377936ddfad375be5403acfa396212d3feab58464'
+          expected_source = '9b18e84724ab9ca11e28e466f9ac8cbc2f41437183637065b25897a8f0b703ed'
+          expected_result = '28a3909cdfd1aa9d11b62d00c828aed6b5b1f52ec7b8105101e8dda2a3836c98'
+          api_url = 'https://api.github.com/repos/' + repo + '/contents/' + path
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'}
+          def request(url, method='GET', data=None, authenticated=False):
+              req = urllib.request.Request(url, method=method, headers=headers if authenticated else {'User-Agent':'IIPLA-preview-build'}, data=None if data is None else json.dumps(data).encode())
+              with urllib.request.urlopen(req, timeout=40) as response:
+                  return response.read()
+          current = json.loads(request(api_url + '?ref=main', authenticated=True))
+          raw = base64.b64decode(current['content'])
+          actual = hashlib.sha256(raw).hexdigest()
+          if actual == expected_result:
+              print('Reviewed Monetization update already published.')
+              raise SystemExit(0)
+          assert actual == expected_base, 'Source changed since review; reconcile before writing: ' + actual
+          transfer_url = 'https://raw.githubusercontent.com/' + repo + '/' + os.environ['SOURCE_COMMIT'] + '/' + folder + 'v4-source.txt'
+          packed = request(transfer_url).decode('ascii').strip()
+          # A transfer-character correction is accepted only if the complete source digest verifies.
+          packed = packed.replace('XkcX0turY', 'XkcX0durY')
+          source = gzip.decompress(base64.b64decode(packed, validate=True))
+          assert hashlib.sha256(source).hexdigest() == expected_source, 'Update-source integrity mismatch'
+          files = json.loads(source)
+          assert set(files) == {'build_v4.py', 'notice_v1.py'}
+          with tempfile.TemporaryDirectory() as tmp:
+              root = pathlib.Path(tmp)
+              for name, contents in files.items():
+                  (root / name).write_text(contents, encoding='utf-8')
+              (root / 'base.html').write_bytes(raw)
+              subprocess.run(['python3', str(root / 'build_v4.py'), str(root / 'base.html'), str(root / 'index.html')], check=True)
+              result = (root / 'index.html').read_bytes()
+          assert hashlib.sha256(result).hexdigest() == expected_result, 'Output differs from the locally tested page'
+          text = result.decode('utf-8')
+          assert "mode: 'preview'" in text and 'privacyApproved: false' in text and 'noindex,nofollow' in text
+          assert text.count('data-faq-item id=') == 28
+          assert 'Patent<br>Monetization' in text and 'patent-monetization-2026-09-22-v1' in text
+          assert 'name="noticeAccepted" required' in text
+          payload = {'message': 'Update IIPLA header to Patent Monetization; add process FAQs and submission notice', 'content': base64.b64encode(result).decode(), 'sha': current['sha'], 'branch': 'main'}
+          response = json.loads(request(api_url, 'PUT', payload, authenticated=True))
+          print('Published', path, 'at', response['commit']['sha'])
+          print('RESULT_SHA256:', expected_result)
+          print('Only the isolated preview HTML changed. Forms remain disabled for live intake.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('## IIPLA Patent Monetization preview updated\n\nVerified against locally tested HTML: renamed header, 28 FAQs, 10-section submission notice, explicit versioned notice acknowledgement. Mandatory phone and all 32 categories retained. Live intake remains disabled.\n')
+          PY
