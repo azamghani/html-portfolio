@@ -1,0 +1,50 @@
+name: Finalize IIPLA sales preview metadata
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-iipla-sales-v7.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: iipla-preview-copy-update
+  cancel-in-progress: false
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Finalize reviewed metadata without changing form behavior
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,os,urllib.request
+          repo=os.environ['REPOSITORY'];assert repo=='azamghani/html-portfolio'
+          path='iipla-patent-brokerage/index.html'
+          url='https://api.github.com/repos/'+repo+'/contents/'+path
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'}
+          def api(method='GET',data=None):
+              req=urllib.request.Request(url,method=method,headers=headers,data=None if data is None else json.dumps(data).encode())
+              with urllib.request.urlopen(req,timeout=40) as r:return json.load(r)
+          current=api();raw=base64.b64decode(current['content']);actual=hashlib.sha256(raw).hexdigest()
+          expected='929a384048693d2abec10e8ce1382ff1c65585bc2b8fed1db9cb00bd728082ea'
+          if actual==expected:print('Final reviewed page already published.');raise SystemExit(0)
+          assert actual=='0a3f32c4687d1bcc775575d5f17b0926bb1923277128c5a0b7c60b3f8ed3f766','Reconcile changed page before writing'
+          text=raw.decode('utf-8')
+          changes={
+            'Start a monetization enquiry':'Start a patent sale enquiry',
+            'IIPLA Patent Brokerage | More ways to monetize your patents':'IIPLA Patent Brokerage | Sell Your Patents',
+            'Patent sales, licensing and structured monetization partnerships. Explore your options with IIPLA.':'Seller-side brokerage for patent sales. Prepare your portfolio and connect with relevant buyers through IIPLA.',
+            '<meta name="iipla-preview-version" content="4.1-2026-09-22">':''
+          }
+          for old,new in changes.items():
+              assert text.count(old)==1,old
+              text=text.replace(old,new)
+          result=text.encode();assert hashlib.sha256(result).hexdigest()==expected
+          payload={'message':'Finalize patent-sales-only social preview and mobile CTA','content':base64.b64encode(result).decode(),'sha':current['sha'],'branch':'main'}
+          response=api('PUT',payload)
+          print('Verified final sales-only page committed:',response['commit']['sha'])
+          PY
