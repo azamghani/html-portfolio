@@ -17,16 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - name: Verify public Monetization branding, FAQs and submission notice
+      - name: Verify public owner CTA, buyer links, independent form and notices
         run: |
           python3 - <<'PY'
           import hashlib, os, time, urllib.request, urllib.error
           from html.parser import HTMLParser
           url = 'https://azamghani.github.io/html-portfolio/iipla-patent-brokerage/'
-          expected = '28a3909cdfd1aa9d11b62d00c828aed6b5b1f52ec7b8105101e8dda2a3836c98'
+          expected = '3ac1a0d781e2bb991e64b21ed1918b686e2d2e42a17490da78b2af4d2452fa6c'
           class PageCheck(HTMLParser):
               def __init__(self):
-                  super().__init__(); self.required=set(); self.cards=0; self.routes=0; self.steps=0; self.faqs=0; self.notice_sections=0; self.forms=set()
+                  super().__init__(); self.required=set(); self.cards=0; self.routes=0; self.steps=0; self.faqs=0; self.notice_sections=0; self.forms=set(); self.buyer_links=0; self.closing=0; self.dialogs=set()
               def handle_starttag(self, tag, attrs):
                   a=dict(attrs)
                   if 'required' in a: self.required.add(a.get('id'))
@@ -35,8 +35,11 @@ jobs:
                   if 'option-card' in classes: self.routes+=1
                   if 'process-item' in classes: self.steps+=1
                   if 'notice-section' in classes: self.notice_sections+=1
+                  if 'closing' in classes: self.closing+=1
                   if 'data-faq-item' in a: self.faqs+=1
+                  if 'data-buyer-open' in a: self.buyer_links+=1
                   if tag=='form': self.forms.add(a.get('id'))
+                  if tag=='dialog': self.dialogs.add(a.get('id'))
           last_error = None
           for attempt in range(24):
               try:
@@ -44,20 +47,23 @@ jobs:
                   with urllib.request.urlopen(req, timeout=12) as response:
                       assert response.status==200
                       body=response.read()
-                  assert hashlib.sha256(body).hexdigest()==expected, 'Waiting for latest Monetization HTML deployment'
+                  assert hashlib.sha256(body).hexdigest()==expected, 'Waiting for v5 buyer enquiry HTML deployment'
                   text=body.decode('utf-8')
                   parser=PageCheck(); parser.feed(text)
-                  assert {'phone','encumbrances','representation','notice-accepted'} <= parser.required
+                  assert {'phone','encumbrances','representation','notice-accepted','buyer-phone','buyer-company','buyer-notice-accepted','buyer-contact-consent'} <= parser.required
                   assert parser.cards==32 and parser.routes==3 and parser.steps==5
                   assert parser.faqs==28 and parser.notice_sections==10
-                  assert {'lead-form','portfolio-form'} <= parser.forms
-                  assert "mode: 'preview'" in text and 'privacyApproved: false' in text and 'noindex,nofollow' in text
-                  assert '4.1-2026-09-22' in text and 'Patent<br>Monetization' in text
-                  assert 'patent-monetization-2026-09-22-v1' in text
+                  assert parser.closing==1 and parser.buyer_links==2
+                  assert {'lead-form','portfolio-form','buyer-form'} <= parser.forms
+                  assert {'submission-notice','buyer-enquiry'} <= parser.dialogs
+                  assert "mode: 'preview'" in text and "mode:'preview'" in text and 'noindex,nofollow' in text
+                  assert 'Patent<br>Monetization' in text
+                  assert 'patent-monetization-2026-09-22-v1' in text and 'BP-2026-09-22-1' in text
+                  assert '5.0-buyer-enquiry' in text
                   print('PUBLIC_URL_VERIFIED:', url)
-                  print('HTTP 200; exact SHA-256 match; Patent Monetization header; 28 FAQs; 10 notice sections; required phone and notice consent; preview forms.')
+                  print('HTTP 200; exact v5 source SHA256; one closing CTA; two buyer links; separate buyer form; mandatory phone; 28 FAQs; 32 technologies; all forms in preview mode.')
                   with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                      summary.write('## Public Monetization URL verified\n\n'+url+'\n\nUnauthenticated HTTP 200. Exact HTML source integrity verified. Updated header, 28 detailed FAQs, 10-section submission notice, versioned acknowledgement, three monetization routes and all 32 categories. Phone remains mandatory. Live intake remains disabled.\n')
+                      summary.write('## Public buyer enquiry update verified\n\n'+url+'\n\nUnauthenticated HTTP 200 and exact locally tested source verified. Existing seller CTA retained; subordinate buyer invitation and footer link open a separate buyer form. Required phone and buyer-specific notice are present. Owner forms, 28 FAQs and 32 technologies retained. No live intake enabled.\n')
                   break
               except (urllib.error.URLError, AssertionError, TimeoutError) as exc:
                   last_error=exc
