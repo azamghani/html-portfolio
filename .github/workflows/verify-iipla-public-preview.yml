@@ -15,59 +15,58 @@ concurrency:
 jobs:
   public-url-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 6
     steps:
-      - name: Verify patent-rights-only copy, notices, FAQs and preserved forms
+      - name: Verify public Patent Brokerage sales-only page
         run: |
           python3 - <<'PY'
           import hashlib, os, time, urllib.request, urllib.error
           from html.parser import HTMLParser
-          url = 'https://azamghani.github.io/html-portfolio/iipla-patent-brokerage/'
-          expected = 'b62f5b731d807618dfc72d120904f5c84d27660be561c855425baaba1730052e'
-          class PageCheck(HTMLParser):
+          url='https://azamghani.github.io/html-portfolio/iipla-patent-brokerage/'
+          expected='0a3f32c4687d1bcc775575d5f17b0926bb1923277128c5a0b7c60b3f8ed3f766'
+          class Check(HTMLParser):
               def __init__(self):
-                  super().__init__(); self.required=set(); self.cards=0; self.routes=0; self.steps=0; self.faqs=0; self.notice_sections=0; self.forms=set(); self.buyer_links=0; self.closing=0; self.dialogs=set()
-              def handle_starttag(self, tag, attrs):
-                  a=dict(attrs)
-                  if 'required' in a: self.required.add(a.get('id'))
-                  classes=a.get('class','').split()
-                  if 'tech-card' in classes: self.cards+=1
-                  if 'option-card' in classes: self.routes+=1
-                  if 'process-item' in classes: self.steps+=1
-                  if 'notice-section' in classes: self.notice_sections+=1
-                  if 'closing' in classes: self.closing+=1
-                  if 'data-faq-item' in a: self.faqs+=1
-                  if 'data-buyer-open' in a: self.buyer_links+=1
-                  if tag=='form': self.forms.add(a.get('id'))
-                  if tag=='dialog': self.dialogs.add(a.get('id'))
-          last_error = None
-          for attempt in range(36):
+                  super().__init__(); self.required=set(); self.cards=0; self.steps=0; self.faqs=0; self.notices=0; self.forms=set(); self.buyers=0; self.closing=0; self.select=None; self.choices={}
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs); classes=a.get('class','').split()
+                  if 'required' in a:self.required.add(a.get('id'))
+                  if 'tech-card' in classes:self.cards+=1
+                  if 'process-item' in classes:self.steps+=1
+                  if 'notice-section' in classes:self.notices+=1
+                  if 'closing' in classes:self.closing+=1
+                  if 'data-faq-item' in a:self.faqs+=1
+                  if 'data-buyer-open' in a:self.buyers+=1
+                  if tag=='form':self.forms.add(a.get('id'))
+                  if tag=='select':self.select=a.get('id');self.choices[self.select]=[]
+                  if tag=='option' and self.select:self.choices[self.select].append(a.get('value'))
+              def handle_endtag(self,tag):
+                  if tag=='select':self.select=None
+          last_error=None
+          for attempt in range(24):
               try:
-                  req=urllib.request.Request(url+'?check='+str(int(time.time())),headers={'User-Agent':'IIPLA-preview-verification','Cache-Control':'no-cache'})
-                  with urllib.request.urlopen(req, timeout=12) as response:
-                      assert response.status==200
-                      body=response.read()
-                  assert hashlib.sha256(body).hexdigest()==expected, 'Waiting for reviewed v6 deployment'
-                  text=body.decode('utf-8'); parser=PageCheck(); parser.feed(text)
-                  assert {'phone','buyer-phone','buyer-company','encumbrances','representation','notice-accepted','buyer-notice-accepted','buyer-contact-consent'} <= parser.required
-                  assert parser.cards==32 and parser.routes==3 and parser.steps==5
-                  assert parser.faqs==30 and parser.notice_sections==10
-                  assert parser.closing==1 and parser.buyer_links==2
-                  assert {'lead-form','portfolio-form','buyer-form'} <= parser.forms
-                  assert {'submission-notice','buyer-enquiry'} <= parser.dialogs
+                  req=urllib.request.Request(url+'?check='+str(int(time.time())),headers={'User-Agent':'IIPLA-sales-preview-verification','Cache-Control':'no-cache'})
+                  with urllib.request.urlopen(req,timeout=12) as r:
+                      assert r.status==200
+                      body=r.read()
+                  assert hashlib.sha256(body).hexdigest()==expected,'Waiting for the exact reviewed v7 page'
+                  text=body.decode('utf-8');p=Check();p.feed(text)
+                  assert {'phone','buyer-phone','encumbrances','representation','notice-accepted','buyer-notice-accepted'}<=p.required
+                  assert p.cards==32 and p.steps==5 and p.faqs==30 and p.notices==10
+                  assert p.closing==1 and p.buyers==2
+                  assert p.forms=={'lead-form','portfolio-form','buyer-form'}
+                  assert p.choices['transaction-goal']==['discuss','sale']
+                  assert p.choices['payment-preference']==['discuss','upfront']
+                  assert p.choices['buyer-interest']==['','acquisition','buyer-representative','exploring']
+                  assert 'Patent<br>Brokerage' in text and '7.0-patent-sales' in text
                   assert "mode: 'preview'" in text and "mode:'preview'" in text and 'noindex,nofollow' in text
-                  assert 'Patent<br>Monetization' in text and '6.0-patent-rights' in text
-                  assert 'patent-monetization-2026-09-22-v2' in text and 'BP-2026-09-22-2' in text
-                  assert 'License your technology' not in text and 'license your technology' not in text
-                  for phrase in ['Direct patent sale.','Direct IP licensing.','Monetization partnership.','patent-scope-title']:
-                      assert phrase in text
+                  assert 'patent-brokerage-2026-09-22-v1' in text and 'PB-BUYER-2026-09-22-1' in text
+                  assert 'License your IP' not in text and 'Explore a partnership' not in text
                   print('PUBLIC_URL_VERIFIED:',url)
-                  print('HTTP 200; exact v6 SHA256; patent-rights-only service; 30 FAQs; 32 categories; one closing CTA; two buyer links; mandatory phones; preview only.')
-                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                      summary.write('## Public patent-rights scope update verified\n\n'+url+'\n\nUnauthenticated HTTP 200 and exact locally tested v6 source verified. Direct patent sale, direct IP licensing and patent monetization partnerships. No technology-commercialization offer. All three forms, required phone numbers, category selection, buyer links and modal retained. 30 FAQs and versioned notices. No live lead capture enabled.\n')
+                  print('HTTP 200; exact tested HTML; Patent Brokerage branding; sales-only owner and buyer choices; required phone; 30 FAQs; 32 categories; all intake in preview mode.')
+                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                      f.write('## Public patent-sales-only page verified\n\n'+url+'\n\nUnauthenticated HTTP 200 and exact local HTML hash confirmed. Sales-only owner intake and buyer acquisition modal; mandatory phone; 30 FAQs; all 32 patent categories. No live lead collection enabled.\n')
                   break
-              except (urllib.error.URLError,AssertionError,TimeoutError) as exc:
-                  last_error=exc;print('Waiting:',str(exc));time.sleep(10)
-          else:
-              raise RuntimeError('Public verification failed: '+str(last_error))
+              except (urllib.error.URLError,AssertionError,TimeoutError) as e:
+                  last_error=e;print('Waiting for deployment:',str(e));time.sleep(10)
+          else:raise RuntimeError('Public verification failed: '+str(last_error))
           PY
