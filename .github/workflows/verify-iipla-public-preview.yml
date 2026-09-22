@@ -17,16 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - name: Check the v3 public URL without authentication
+      - name: Verify public Monetization branding, FAQs and submission notice
         run: |
           python3 - <<'PY'
           import hashlib, os, time, urllib.request, urllib.error
           from html.parser import HTMLParser
           url = 'https://azamghani.github.io/html-portfolio/iipla-patent-brokerage/'
-          expected = '96eb5133a3a238e1f3b42e6377936ddfad375be5403acfa396212d3feab58464'
+          expected = '28a3909cdfd1aa9d11b62d00c828aed6b5b1f52ec7b8105101e8dda2a3836c98'
           class PageCheck(HTMLParser):
               def __init__(self):
-                  super().__init__(); self.required=set(); self.cards=0; self.routes=0; self.steps=0; self.forms=set()
+                  super().__init__(); self.required=set(); self.cards=0; self.routes=0; self.steps=0; self.faqs=0; self.notice_sections=0; self.forms=set()
               def handle_starttag(self, tag, attrs):
                   a=dict(attrs)
                   if 'required' in a: self.required.add(a.get('id'))
@@ -34,6 +34,8 @@ jobs:
                   if 'tech-card' in classes: self.cards+=1
                   if 'option-card' in classes: self.routes+=1
                   if 'process-item' in classes: self.steps+=1
+                  if 'notice-section' in classes: self.notice_sections+=1
+                  if 'data-faq-item' in a: self.faqs+=1
                   if tag=='form': self.forms.add(a.get('id'))
           last_error = None
           for attempt in range(24):
@@ -42,18 +44,20 @@ jobs:
                   with urllib.request.urlopen(req, timeout=12) as response:
                       assert response.status==200
                       body=response.read()
-                  assert hashlib.sha256(body).hexdigest()==expected, 'Waiting for latest v3 HTML deployment'
+                  assert hashlib.sha256(body).hexdigest()==expected, 'Waiting for latest Monetization HTML deployment'
                   text=body.decode('utf-8')
                   parser=PageCheck(); parser.feed(text)
-                  assert {'phone','encumbrances','representation'} <= parser.required
+                  assert {'phone','encumbrances','representation','notice-accepted'} <= parser.required
                   assert parser.cards==32 and parser.routes==3 and parser.steps==5
+                  assert parser.faqs==28 and parser.notice_sections==10
                   assert {'lead-form','portfolio-form'} <= parser.forms
-                  assert "mode: 'preview'" in text and 'noindex,nofollow' in text
-                  assert '3.0-2026-09-22' in text
+                  assert "mode: 'preview'" in text and 'privacyApproved: false' in text and 'noindex,nofollow' in text
+                  assert '4.1-2026-09-22' in text and 'Patent<br>Monetization' in text
+                  assert 'patent-monetization-2026-09-22-v1' in text
                   print('PUBLIC_URL_VERIFIED:', url)
-                  print('HTTP 200; exact v3 SHA-256 match; 32 technologies; 3 routes; 5 process steps; mandatory phone; preview forms.')
+                  print('HTTP 200; exact SHA-256 match; Patent Monetization header; 28 FAQs; 10 notice sections; required phone and notice consent; preview forms.')
                   with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                      summary.write('## Public v3 URL verified\n\n'+url+'\n\nUnauthenticated HTTP 200. Exact HTML source integrity checked. Three monetization routes, five process steps, 32 technology categories and required phone confirmed. Forms remain in preview mode.\n')
+                      summary.write('## Public Monetization URL verified\n\n'+url+'\n\nUnauthenticated HTTP 200. Exact HTML source integrity verified. Updated header, 28 detailed FAQs, 10-section submission notice, versioned acknowledgement, three monetization routes and all 32 categories. Phone remains mandatory. Live intake remains disabled.\n')
                   break
               except (urllib.error.URLError, AssertionError, TimeoutError) as exc:
                   last_error=exc
